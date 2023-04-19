@@ -24,6 +24,8 @@ public:
 		return ((fn_type)fn)(args...);
 	}
 
+	void print_syscalls();
+
 private:
 	struct SyscallInfo {
 		std::string name;
@@ -33,7 +35,6 @@ private:
 	};
 
 	std::vector<SyscallInfo> find_syscalls();
-	void print_syscalls();
 	void allocate_syscalls();
 
 	void map_ntdll(); // maps ntdll from disk into a buffer to ensure its unmodified.
