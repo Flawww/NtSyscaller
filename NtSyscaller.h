@@ -9,6 +9,7 @@ public:
 	NtSyscaller();
 	~NtSyscaller();
 
+	// Performs the actual syscall. syscall_hash is the FNV1a hash of the syscall name. 
 	template<typename ... targs>
 	int syscall(uint32_t syscall_hash, targs ... args) {
 		uintptr_t fn = m_syscalls[syscall_hash];
@@ -24,6 +25,7 @@ public:
 		return ((fn_type)fn)(args...);
 	}
 
+	// prints all available syscalls
 	void print_syscalls();
 
 private:
@@ -34,10 +36,13 @@ private:
 		int32_t number;
 	};
 
+	// parses the export directory of ntdll.dll and saves all syscall
 	std::vector<SyscallInfo> find_syscalls();
+	// allocations the shellcode for the syscalls
 	void allocate_syscalls();
 
-	void map_ntdll(); // maps ntdll from disk into a buffer to ensure its unmodified.
+	// maps ntdll from disk into a buffer to ensure its unmodified.
+	void map_ntdll(); 
 
 	uintptr_t m_ntdll_address;
 	uint8_t* m_ntdll_image; // Contains a copy of ntdll from disk

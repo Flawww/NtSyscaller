@@ -19,8 +19,9 @@ constexpr uint32_t SYSCALL_WOW64_TRANSFER_OFFSET = 6;
 
 NtSyscaller::NtSyscaller(): m_ntdll_image(nullptr), m_shellcode_buffer(nullptr) {
 	m_ntdll_address = uintptr_t(GetModuleHandleA("ntdll.dll"));
-	map_ntdll();
+	map_ntdll(); // map a clean copy of ntdll into memory.
 
+	// find syscalls and create the shellcode for calling all of them
 	m_syscall_info = find_syscalls();
 	//print_syscalls(syscalls);
 
@@ -35,6 +36,7 @@ NtSyscaller::~NtSyscaller() {
 std::vector<NtSyscaller::SyscallInfo> NtSyscaller::find_syscalls() {
 	std::vector<SyscallInfo> syscalls;
 
+	// Since we have already read this from m_ntdll_image in map_ntdll, this is safe.
 	PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)m_ntdll_image;
 	PIMAGE_NT_HEADERS nt_headers = (PIMAGE_NT_HEADERS)(m_ntdll_image + dos_header->e_lfanew);
 	PIMAGE_EXPORT_DIRECTORY export_dir = (PIMAGE_EXPORT_DIRECTORY)(m_ntdll_image + nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
@@ -63,6 +65,7 @@ std::vector<NtSyscaller::SyscallInfo> NtSyscaller::find_syscalls() {
 			}
 		}
 #endif
+		// Syscall? In that case fill out the SyscallInfo and push it to the vector.
 		if (is_syscall) {
 			SyscallInfo info;
 			info.name = name;
@@ -89,22 +92,24 @@ void NtSyscaller::allocate_syscalls() {
 		return;
 	}
 
+	// allocate where the shellcode for the manual syscalls will reside
 	m_shellcode_buffer = (uint8_t*)VirtualAlloc(nullptr, SYSCALL_BYTE_SIZE * m_syscall_info.size(), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 	if (!m_shellcode_buffer) {
 		throw std::runtime_error("Failed to allocate buffer for syscall shellcode");
 	}
 	
 #ifndef _WIN64
+	// real address of the segment transfer shellcode from ntdll.dll
 	uint32_t segment_transfer = *(uint32_t*)(m_ntdll_address + m_syscall_info[0].rva + SYSCALL_WOW64_TRANSFER_OFFSET);
 #endif
 
 	for (int i = 0; i < m_syscall_info.size(); i++) {
 		uint8_t* cur_pos = m_shellcode_buffer + i * SYSCALL_BYTE_SIZE;
 		memcpy(cur_pos, m_ntdll_image + m_syscall_info[i].rva, SYSCALL_BYTE_SIZE);
-		m_syscalls[FNV1A_RUNTIME(m_syscall_info[i].name.c_str())] = uintptr_t(cur_pos);
+		m_syscalls[FNV1A_RUNTIME(m_syscall_info[i].name.c_str())] = uintptr_t(cur_pos); // write to hash map
 
 #ifndef _WIN64
-		* (uint32_t*)(cur_pos + SYSCALL_WOW64_TRANSFER_OFFSET) = segment_transfer;
+		* (uint32_t*)(cur_pos + SYSCALL_WOW64_TRANSFER_OFFSET) = segment_transfer; // use the segment transfer from normal ntdll
 #endif
 	}
 }
@@ -123,7 +128,7 @@ void NtSyscaller::map_ntdll() {
 	if (!file_buffer) {
 		throw std::runtime_error("Failed to allocate buffer for ntdll file");
 	}
-	file.read((char*)file_buffer, file_size);
+	file.read((char*)file_buffer, file_size); // read file as binary
 
 	// Map the "fresh" ntdll into memory 
 	PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)file_buffer;
@@ -150,6 +155,6 @@ void NtSyscaller::map_ntdll() {
 		memcpy(m_ntdll_image + section_header[i].VirtualAddress, file_buffer + section_header[i].PointerToRawData, section_header[i].SizeOfRawData);
 	}
 
-	// cleanup
+	// file buffer isnt important anymore, we already mapped it into memory (m_ntdll_image).
 	delete[] file_buffer;
 }
